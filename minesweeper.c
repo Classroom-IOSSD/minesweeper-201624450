@@ -1,35 +1,3 @@
-" Colors
-syntax enable           " enable syntax processing
-
-" Spaces & TABs
-set tabstop=4           " number of visual spaces per TAB
-set softtabstop=4       " number of spaces in tab when editing
-set expandtab           " tabs are spaces
-set autoindent          " default indent
-
-" Mouse
-set mouse=a             " set mouse mode all
-" set mouse-=a          " unset mouse mode all
-
-" UI Configuration
-set nu                  " line number
-set cursorline          " highlight current line
-filetype indent on    " load filetype-specific indent files
-set wildmenu            " visual autocomplete for command menu
-
-" Searching
-set incsearch           " search as characters are entered
-set hlsearch            " highlight matches
-
-" Folding
-set foldenable          " enable folding
-set foldlevelstart=10   " open most folds by default
-set foldnestmax=10      " 10 nested fold max
-" space open/closes folds
-nnoremap <space> za
-set foldmethod=indent   " fold based on indent level
-
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -54,14 +22,25 @@ set foldmethod=indent   " fold based on indent level
 #define KCYN  "\x1B[36m"
 #define KWHT  "\x1B[37m"
 
+#define BIT(x) (0x01 << (x))
+#define BITMASK_SET(x,y) ((x) |= (y))
+#define BITMASK_CLEAR(x,y) ((x) &= (~(y)))
+#define BITMASK_FLIP(x,y) ((x) ^= (y))
+#define BITMASK_CHECK(x,y) (((x) & (y)) == (y))
+
 
 // global variables
 // game table
 unsigned char table_array[MAX][MAX];
 // location of cursor
-int x=0, y=0;
+int cur_x=0, cur_y=0;
 // flag: input mode = 0, flag mode = 1, check mode = 2
 int game_mode=0;
+
+const unsigned int FLAG_MASK = BIT(4);
+const unsigned int UNCOVERED_MASK = BIT(5);
+const unsigned int MINE_MASK = BIT(6);
+
 
 /*This is a recursive function which uncovers blank cells while they are adjacent*/
 int uncover_blank_cell(int row, int col){
@@ -96,6 +75,9 @@ int uncover_blank_cell(int row, int col){
 
 	return 1; // success!
 }
+inline unsigned int num_mines(unsigned int cell){
+        BIT(cell);
+}
 
 void print_table() {
 	// clear screen
@@ -104,7 +86,7 @@ void print_table() {
 	int i, j, value;
 	for(i = 0; i < MAX; i++){
 		for(j = 0; j < MAX; j++){
-			if(x == j && y == i) {
+			if(cur_x == j && cur_y == i) {
 				if(game_mode == 1) {
 					printf("|%sF%s",BMAG,KNRM);
 					continue;
@@ -117,16 +99,14 @@ void print_table() {
 			}
 			value = table_array[i][j];
 
-			if((value >= 0 && value <= 8) || value == 0 || value == 99)
-				printf("|X");
-			else if(value == 10) // clean area
-				printf("|%s%d%s",KCYN, value - 10,KNRM);
-			else if(value == 11) // the number of near mine is 1
-				printf("|%s%d%s",KYEL, value - 10,KNRM);
-			else if(value > 11 && value <= 18) // the number of near mine is greater than 1
-				printf("|%s%d%s",KRED, value - 10,KNRM);
-			else if((value >= 20 && value <= 28) || value == 100)
-				printf("|%sF%s",KGRN,KNRM);
+				if((value >= 0 && value <= 8) || value == 0 || value == 99)
+					printf("|X");
+				else if(num_mines(value) == 0) // clean area
+					printf("|%s%d%s",KCYN, num_mines(value),KNRM);
+				else if(num_mines(value) == 1) // the number of near mine is 1
+					printf("|%s%d%s",KYEL, num_mines(value),KNRM);
+				else if(num_mines(value) > 1) // the number of near mine is greater than 1
+				printf("|%s%d%s",KRED, num_mines(value),KNRM);
 			else
 				printf("ERROR"); // test purposes
 		
@@ -148,12 +128,20 @@ void print_table() {
 
 }
 
+inline _Bool has_mine(unsigned int cell){
+	return BITMASK_CHECK(cell, MINE_MASK);
+}
+
+inline void put_mine(unsigned int cell){
+	BITMASK_SET(cell, MINE_MASK);
+}
+
 
 int main(int argc, char *argv[]){
 
 	char ch;
 	int nMines; // the number of the remaining mines
-	int i,j,r,c,value, rows[8], columns[8];
+	int loc_x,loc_y,r,c,value, rows[8], columns[8];
 	
 new_game:
 	// the number of mines
@@ -163,14 +151,14 @@ new_game:
 	}
 	srand (time(NULL));						// random seed
 	// setting cursor
-	x = 0;
-	y = 0;
+	cur_x = 0;
+	cur_y = 0;
 	// set all cells to 0
-	for(i = 0; i < 10; i++)				
-		for(j = 0; j < 10; j++)
-			table_array[i][j] = 0;
+	for(loc_x = 0; loc_x < 10; loc_x++)				
+		for(loc_y = 0; loc_y < 10; loc_y++)
+			table_array[loc_x][loc_y] = 0;
 
-	for(i = 0; i < nMines; i++){
+	for(loc_x = 0; loc_x < nMines; loc_x++){
 		/* initialize random seed: */
 
 		r = rand() % 10;					// it generates a integer in the range 0 to 9
@@ -190,16 +178,16 @@ new_game:
 			rows[6] = r;		columns[6] = c - 1;
 			rows[7] = r + 1;	columns[7] = c - 1;
 
-			for(j = 0; j < 8; j++){
-				value = table_array[rows[j]][columns[j]];
-				if( (rows[j] >= 0 && rows[j] < MAX) && (columns[j] >= 0 && columns[j] < MAX) ){		// to prevent negative index and out of bounds
+			for(loc_y = 0; loc_y < 8; loc_y++){
+				value = table_array[rows[loc_y]][columns[loc_y]];
+				if( (rows[loc_y] >= 0 && rows[loc_y] < MAX) && (columns[loc_y] >= 0 && columns[loc_y] < MAX) ){		// to prevent negative index and out of bounds
 						if(value != 99)																// to prevent remove mines
-							table_array[rows[j]][columns[j]] += 1;									// sums 1 to each adjacent cell
+							table_array[rows[loc_y]][columns[loc_y]] += 1;									// sums 1 to each adjacent cell
 				}
 			}
 			
 		}else{								// to make sure that there are the properly number of mines in table
-			i--;
+			loc_x--;
 			continue;
 		}
 	}
@@ -226,28 +214,28 @@ flag_mode:
 			// arrow direction
 			if(direction == '8') {
 				// up
-				y = (MAX + --y) % MAX;
+				cur_y = (MAX + --cur_y) % MAX;
 			} else if(direction == '2') {
 				// down
-				y = ++y % MAX;
+				cur_y = ++cur_y % MAX;
 			} else if(direction == '4') {
-				x = (MAX + --x) % MAX;
+				cur_x = (MAX + --cur_x) % MAX;
 			} else if(direction == '6') {
-				x = ++x % MAX;
+				cur_x = ++cur_x % MAX;
 			}
 			else if(direction == 'c' || direction == 'C') {
 				goto check_mode;
 			}
 			else if(direction == '\n') {
-				value = table_array[y][x];
+				value = table_array[cur_y][cur_x];
 	
 				if (value == 99){					// mine case
-					table_array[y][x] += 1;
+					table_array[cur_y][cur_x] += 1;
 					nMines -= 1;				// mine found
 				}else if(value >= 0 && value <= 8){	// number of mines case (the next cell is a mine)
-					table_array[y][x] += 20;
+					table_array[cur_y][cur_x] += 20;
 				}else if(value >= 20 && value <= 28){
-					table_array[y][x] -= 20;
+					table_array[cur_y][cur_x] -= 20;
 				}
 				
 				if(nMines == 0)
@@ -272,27 +260,27 @@ check_mode:
 			// arrow direction
 			if(direction == '8') {
 				// up
-				y = (MAX + --y) % MAX;
+				cur_y = (MAX + --cur_y) % MAX;
 			} else if(direction == '2') {
 				// down
-				y = ++y % MAX;
+				cur_y = ++cur_y % MAX;
 			} else if(direction == '4') {
-				x = (MAX + --x) % MAX;
+				cur_x = (MAX + --cur_x) % MAX;
 			} else if(direction == '6') {
-				x = ++x % MAX;
+				cur_x = ++cur_x % MAX;
 			}
 			else if(direction == 'f' || direction == 'F') {
 				goto flag_mode;
 			}
 			
 			else if(direction == '\n') {
-				value = table_array[y][x];
+				value = table_array[cur_y][cur_x];
 				if(value == 0)						// blank case
-					uncover_blank_cell(y, x);	
+					uncover_blank_cell(cur_y, cur_x);	
 				else if(value == 99)				// mine case
 					goto end_of_game;
 				else if(value > 0 && value <= 8)	// number case (the next cell is a mine)
-					table_array[y][x] += 10;
+					table_array[cur_y][cur_x] += 10;
 
 			//	break;
 			} 
